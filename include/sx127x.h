@@ -356,6 +356,8 @@ struct sx127x_t {
   uint64_t *frequencies;
   uint8_t frequencies_length;
   uint8_t current_frequency;
+  bool iq_inverted_tx;
+  bool iq_inverted_rx;
 };
 
 /**
@@ -560,6 +562,15 @@ int sx127x_rx_set_lna_gain(sx127x_gain_t gain, sx127x *device);
  *         - SX127X_OK                on success
  */
 int sx127x_rx_set_lna_boost_hf(bool value, sx127x *device);
+
+/**
+ * @brief Set LoRa IQ inverted for tx and rx.
+ *
+ * @param rx_inverted IQ inverted for RX
+ * @param tx_inverted IQ inverted for TX
+ * @param device Pointer to variable to hold the device handle
+ */
+void sx127x_set_iq_inverted(bool rx_inverted, bool tx_inverted, sx127x *device);
 
 /**
  * @brief Set callback function for rxdone interrupt.

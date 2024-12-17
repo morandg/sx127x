@@ -20,6 +20,9 @@
 
 #define SX127x_VERSION 0x12
 
+#define SX127x_INVERTIQ2_DISABLED 0x1D
+#define SX127x_INVERTIQ2_ENABLED 0x19
+
 #define SX127x_OSCILLATOR_FREQUENCY 32000000.0f
 #define SX127x_FREQ_ERROR_FACTOR ((1 << 24) / SX127x_OSCILLATOR_FREQUENCY)
 #define SX127x_FSTEP (SX127x_OSCILLATOR_FREQUENCY / (1 << 19))
@@ -64,6 +67,10 @@
 #define HALF_MAX_FIFO_THRESHOLD (MAX_FIFO_THRESHOLD >> 1)
 #define TX_START_CONDITION_FIFO_LEVEL 0b00000000
 #define TX_START_CONDITION_FIFO_EMPTY 0b10000000
+
+#define IQ_INVERTED_MASK 0xBE
+#define IQ_INVERTED_TX 0x01
+#define IQ_INVERTED_RX 0x40
 
 #define SHADOW_NOT_CACHED 0
 #define SHADOW_CACHED 1
@@ -202,6 +209,34 @@ int sx127x_append_register(int reg, uint8_t value, uint8_t mask, shadow_spi_devi
   ERROR_CHECK(sx127x_read_register(reg, spi_device, &previous));
   uint8_t data[] = {(previous & mask) | value};
   return sx127x_shadow_spi_write_register(reg, data, 1, spi_device);
+}
+
+static int sx127x_configure_iq_tx(sx127x *device) {
+  uint8_t iq_inverted_value = 0x00;
+  uint8_t iq_inverted2_value = SX127x_INVERTIQ2_DISABLED;
+
+  if (device->iq_inverted_tx) {
+    iq_inverted2_value = SX127x_INVERTIQ2_ENABLED;
+    iq_inverted_value = IQ_INVERTED_TX;
+  }
+  ERROR_CHECK(sx127x_append_register(REGINVERTIQ, iq_inverted_value, IQ_INVERTED_MASK, &device->spi_device));
+  ERROR_CHECK(sx127x_shadow_spi_write_register(REGINVERTIQ2, &iq_inverted2_value, 1, &device->spi_device));
+
+  return 0;
+}
+
+static int sx127x_configure_iq_rx(sx127x *device) {
+  uint8_t iq_inverted_value = 0x00;
+  uint8_t iq_inverted2_value = SX127x_INVERTIQ2_DISABLED;
+
+  if (device->iq_inverted_rx) {
+    iq_inverted2_value = SX127x_INVERTIQ2_ENABLED;
+    iq_inverted_value = IQ_INVERTED_RX;
+  }
+  ERROR_CHECK(sx127x_append_register(REGINVERTIQ, iq_inverted_value, IQ_INVERTED_MASK, &device->spi_device));
+  ERROR_CHECK(sx127x_shadow_spi_write_register(REGINVERTIQ2, &iq_inverted2_value, 1, &device->spi_device));
+
+  return 0;
 }
 
 int sx127x_lora_set_low_datarate_optimization(bool enable, sx127x *device) {
@@ -554,6 +589,8 @@ int sx127x_create(void *spi_device, sx127x *result) {
   result->fsk_crc_type = SX127X_CRC_CCITT;
   result->use_implicit_header = false;
   result->expected_packet_length = 0;
+  result->iq_inverted_tx = false;
+  result->iq_inverted_rx = false;
   return SX127X_OK;
 }
 
@@ -561,9 +598,11 @@ int sx127x_set_opmod(sx127x_mode_t opmod, sx127x_modulation_t modulation, sx127x
   // enforce DIO mappings for RX and TX
   if (modulation == SX127x_MODULATION_LORA) {
     if (opmod == SX127x_MODE_RX_CONT || opmod == SX127x_MODE_RX_SINGLE) {
+      ERROR_CHECK(sx127x_configure_iq_rx(device));
       uint8_t data = (SX127x_DIO0_RX_DONE | SX127x_DIO1_RXTIMEOUT | SX127x_DIO2_FHSS_CHANGE_CHANNEL | SX127x_DIO3_CAD_DONE);
       ERROR_CHECK(sx127x_shadow_spi_write_register(REGDIOMAPPING1, &data, 1, &device->spi_device));
     } else if (opmod == SX127x_MODE_TX) {
+      ERROR_CHECK(sx127x_configure_iq_tx(device));
       uint8_t data = (SX127x_DIO0_TX_DONE | SX127x_DIO1_FHSS_CHANGE_CHANNEL | SX127x_DIO2_FHSS_CHANGE_CHANNEL | SX127x_DIO3_CAD_DONE);
       ERROR_CHECK(sx127x_shadow_spi_write_register(REGDIOMAPPING1, &data, 1, &device->spi_device));
     } else if (opmod == SX127x_MODE_CAD) {
@@ -675,6 +714,12 @@ int sx127x_lora_set_modem_config_2(sx127x_sf_t spreading_factor, sx127x *device)
 
 void sx127x_rx_set_callback(void (*rx_callback)(sx127x *, uint8_t *, uint16_t), sx127x *device) {
   device->rx_callback = rx_callback;
+}
+
+void sx127x_set_iq_inverted(bool rx_inverted, bool tx_inverted, sx127x *device)
+{
+  device->iq_inverted_rx = rx_inverted;
+  device->iq_inverted_tx = tx_inverted;
 }
 
 int sx127x_lora_set_syncword(uint8_t value, sx127x *device) {
